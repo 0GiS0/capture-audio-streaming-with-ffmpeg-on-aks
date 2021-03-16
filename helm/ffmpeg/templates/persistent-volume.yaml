@@ -1,0 +1,15 @@
+{{- if not (lookup "v1" "PersistentVolumeClaim" "default" "ffmpeg-volume") }}
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ .Values.persistentVolumeClaim }}
+  labels:
+    {{- include "ffmpeg.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: azure-file-class
+  resources:
+    requests:
+      storage: 1Gi
+{{- end }}

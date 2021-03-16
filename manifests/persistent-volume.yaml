@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ffmpeg-volume
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: azure-file-class
+  resources:
+    requests:
+      storage: 10Gi

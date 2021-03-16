@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ffmpeg.fullname" . }}-config
+  labels: 
+    {{- include "ffmpeg.labels" . | nindent 4 }}
+data:
+  path: "/ffmpeg/chunks" #The path you want to use to map the persistent volume
+  stream: {{ .Values.streamURL }} #The stream you want to record
+  stream.name: {{ .Values.streamName  }} #The stream name (in order to create a folder and a container)
+  segment.time: "600" #10 min
+  file.format: "%Y%m%dT%H%M%S" #Format example: 20130208T080910

@@ -1,0 +1,48 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: ffmpeg-cronjob
+spec:
+  schedule: "*/5 * * * *" #every five minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: cleaner
+              image: 0gis0/transfer-files-job
+              imagePullPolicy: Always #I'm doing a lot of change
+              env:
+                - name: AZURE_STORAGE_CONNECTION_STRING
+                  valueFrom:
+                    secretKeyRef:
+                      name: ffmpeg-secrets
+                      key: AZURE_STORAGE_CONNECTION_STRING
+                - name: FFMPEG_PATH
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ffmpeg-config
+                      key: path
+                      optional: false
+                - name: STREAM_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ffmpeg-config
+                      key: stream.name
+                      optional: false
+                - name: FOLDER
+                  value: $(FFMPEG_PATH)/$(STREAM_NAME)
+                - name: FILE_DURATION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ffmpeg-config
+                      key: segment.time
+                      optional: false
+              volumeMounts:
+                - name: ffmpeg-chunks
+                  mountPath: /ffmpeg/chunks
+          restartPolicy: OnFailure
+          volumes:
+            - name: ffmpeg-chunks
+              persistentVolumeClaim:
+                claimName: ffmpeg-volume

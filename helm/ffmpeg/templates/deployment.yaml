@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ffmpeg.fullname" . }}
+  labels:
+    {{- include "ffmpeg.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ffmpeg.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ffmpeg.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ffmpeg.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: FOLDER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ffmpeg.fullname" . }}-config
+                  key: stream.name
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FFMPEG_PATH
+              value: "/ffmpeg/chunks/$(FOLDER)"
+            - name: SEGMENT_TIME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ffmpeg.fullname" . }}-config
+                  key: segment.time
+            - name: FILE_FORMAT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ffmpeg.fullname" . }}-config
+                  key: file.format
+            - name: STREAM
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ffmpeg.fullname" . }}-config
+                  key: stream
+          args:
+            [
+              "-y",
+              "-i",
+              "$(STREAM)",
+              "-f",
+              "segment",
+              "-strftime",
+              "1",
+              "-segment_time",
+              "$(SEGMENT_TIME)",
+              "$(FFMPEG_PATH)/$(MY_POD_NAME)_$(FILE_FORMAT).mp3",
+            ]
+          volumeMounts:
+            - name: ffmpeg-chunks
+              mountPath: /ffmpeg/chunks
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      initContainers:
+        - name: folder
+          image: busybox
+          env:
+            - name: FOLDER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ffmpeg.fullname" . }}-config
+                  key: stream.name
+            - name: FFMPEG_PATH
+              value: "/ffmpeg/chunks/$(FOLDER)"
+          command:
+            - mkdir
+            - "-p"
+            - "$(FFMPEG_PATH)"
+          volumeMounts:
+            - name: ffmpeg-chunks
+              mountPath: /ffmpeg/chunks/
+      volumes:
+        - name: ffmpeg-chunks
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistentVolumeClaim  }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
