@@ -1,15 +1,28 @@
 ### 0. Execute ffmpeg locally ###
 
+#Mac & Linux
 AUDIO_STREAM="http://[STREAM_URL]"
 mkdir -p chunks
-ffmpeg -y -i ${AUDIO_STREAM} -f segment -strftime 1 -segment_time 300 chunks/%Y%m%dT%H%M%S.mp3
+ffmpeg -y -i ${AUDIO_STREAM} -f segment -segment_time 300 -strftime 1 chunks/%Y%m%dT%H%M%S.mp3
+
+#Windows (PowerShell)
+$AUDIO_STREAM="http://[STREAM_URL]"
+mkdir -p chunks
+ffmpeg -y -i ${AUDIO_STREAM}  -f segment -segment_time 300 -strftime 1 chunks/%Y%m%dT%H%M%S.mp3
+
 
 ### 1. Execute ffmpeg on Docker ###
-
+#Mac & Linux
 docker run \
     -v "$(pwd)/chunks":/ffmpeg/chunks \
     jrottenberg/ffmpeg:4.1-alpine \
-    -y -i ${AUDIO_STREAM} -f segment -strftime 1 -segment_time 300 /ffmpeg/chunks/%Y%m%dT%H%M%S.mp3
+    -y -i ${AUDIO_STREAM} -f segment -segment_time 300 -strftime 1 /ffmpeg/chunks/%Y%m%dT%H%M%S.mp3
+
+#Windows (PowerShell)
+docker run `
+    -v ${PWD}\chunks:/ffmpeg/chunks `
+    jrottenberg/ffmpeg:4.1-alpine `
+    -y -i ${AUDIO_STREAM} -f segment -segment_time 300 -strftime 1 /ffmpeg/chunks/%Y%m%dT%H%M%S.mp3
 
 ### 2. Deploy Azure resources using Terraform ###
 
