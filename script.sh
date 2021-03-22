@@ -93,7 +93,8 @@ kubectl get pods -w
 #You can check on Azure Storage the file that are transferred
 
 #Helm to template the resources and deploy them multiple times
-helm install myaudiostream ./helm/ffmpeg --set streamName=STREAM_NAME --set streamURL=https://STREAM_URL --set storageConnectionString=$CONNECTION_STRING
+helm install myaudiostream ./helm/ffmpeg --set streamName=STREAM_NAME --set streamURL=https://STREAM_URL --set storageConnectionString=$CONNECTION_STRING --set cronImage=${ACR_NAME}.azurecr.io/transfer-files-job
+
 helm uninstall myaudiostream
 
 #Check resources

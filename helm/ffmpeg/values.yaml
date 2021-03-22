@@ -85,3 +85,5 @@ storageClass: "azure-file-class"
 streamName: ""
 
 streamURL: ""
+
+cronImage: ""

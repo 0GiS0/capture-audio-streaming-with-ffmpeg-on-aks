@@ -12,7 +12,7 @@ spec:
         spec:
           containers:
             - name: cleaner
-              image: 0gis0/transfer-files-job
+              image: {{ .Values.cronImage }}
               imagePullPolicy: Always #I'm doing a lot of change
               env:
                 - name: AZURE_STORAGE_CONNECTION_STRING
