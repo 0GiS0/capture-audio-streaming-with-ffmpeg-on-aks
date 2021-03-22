@@ -2,38 +2,33 @@ const fs = require("fs"),
     path = require("path"),
     { getAudioDurationInSeconds } = require("get-audio-duration"),
     azure = require('azure-storage'),
-    { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob"),
+    { BlobServiceClient } = require("@azure/storage-blob"),
     moment = require("moment");
 
 require("dotenv").config();
 
-//constants
+
 const TABLE_STORAGE = 'audios';
-
-// Globals
-
 var containerClient = null;
 var tableClient = null;
-
 var candidatesToTransfer = new Array();
 var referenceDate = null;
 
-var registries = null;
 
-
-//Recupero todos los archivos de la carpeta donde se están grabando
+//I recover all the files from the folder where they are being recorded
 fs.readdir(process.env.FOLDER, async function (err, files) {
 
-    //Compruebo si ha habido algún error al escanear
+    //I check for an error while scanning
     if (err) {
         return console.log(`Unable to scan the directory ${process.env.FOLDER}`);
     }
 
-    //Configuro los clientes de Azure Storage (para crear blobs e insertar registros en la tabla)
+    //I configure Azure Storage clients (to create blobs and insert records in the table)
     await configureStorageAccount();
 
-    //Como fecha de referencia cojo la última guardada en Azure Table Storage
+    //As a reference date I take the last one saved in Azure Table Storage
     var query = new azure.TableQuery()
+        .top(1)
         .where('PartitionKey eq ?', process.env.STREAM_NAME.toLocaleLowerCase());
 
     tableClient.queryEntities(TABLE_STORAGE, query, null, async function (error, result, response) {
@@ -44,15 +39,22 @@ fs.readdir(process.env.FOLDER, async function (err, files) {
 
         console.log(`results from Azure Storage Table`);
         console.log(result);
+        console.log(`result.entries.length: ${result.entries.length}`);
 
-        registries = result.entries;
+        if (result.entries.length > 0) {
+            // Reference date based on the last file recorded
+            var lastFileRecorded = result.entries[0];
+            console.log(`lastFileRecorded:`)
+            console.log(lastFileRecorded);
+            referenceDate = getDateFromFileName(lastFileRecorded.fileName._);
 
-        //TODO: recuperar el último registro guardado para este stream
+        }
+        else {
+            // And if there is no file I choose the current moment
+            referenceDate = moment(new Date());
+        }
 
-
-
-        //Y si no hay ninguna fecha elijo el momento actual
-        referenceDate = moment(new Date());
+        console.log(`The reference date is: ${referenceDate}`);
 
 
         //Get only audio files
@@ -67,7 +69,7 @@ fs.readdir(process.env.FOLDER, async function (err, files) {
         for (const file of audioFiles) {
             console.log(`Analyzing file ${file}`);
 
-            //Recupero la duración del archivo
+            //I retrieve the duration of the file
             var duration = await getAudioDurationInSeconds(`${process.env.FOLDER}/${file}`);
 
             console.log(`${file} duration: ${Math.round(duration / 60)} minutes.`);
@@ -90,139 +92,167 @@ fs.readdir(process.env.FOLDER, async function (err, files) {
             let diff = referenceDate.diff(dateToCompare, 'seconds');
             console.log(`diff: ${diff}`);
 
-            if (diff > 0) {
-                if (nearestFile) {
-                    var nearestDate = getDateFromFileName(nearestFile);
-                    if (nearestDate.diff(dateToCompare, 'seconds') < 0) {
-                        nearestFile = candidate;
+
+            //If there are files older than 10 minutes (600 seconds)
+            if (diff < -600) {
+                console.log(`There are files older than 10 minutes`);
+
+                //Order by date
+                candidatesToTransfer.sort((a, b) => {
+                    return getDateFromFileName(a) - getDateFromFileName(b);
+                });
+
+                console.log(`candidates ordered by date:`);
+                console.log(candidatesToTransfer);
+
+                //Pick up with the candidates closest to the reference date (Get the odd elements of the array in order to get the closest)
+                for (var i = 0; i < candidatesToTransfer.length; i++) {
+                    if (i % 2 !== 0) { // index is odd
+                        var fileToTransfer = candidatesToTransfer[i];
+                        //Transfer file
+                        console.log(`Transfer file ${fileToTransfer}`);
+                        referenceDate = getDateFromFileName(fileToTransfer);
+                        await transferToBlob(fileToTransfer);
                     }
                 }
-                else {
-                    nearestFile = candidate;
+            }
+            else {
+
+                if (diff > 0) {
+                    if (nearestFile) {
+                        var nearestDate = getDateFromFileName(nearestFile);
+                        if (nearestDate.diff(dateToCompare, 'seconds') < 0) {
+                            nearestFile = candidate;
+                        }
+                    }
+                    else {
+                        nearestFile = candidate;
+                    }
                 }
             }
         }
 
-        console.log(`The nearest file is: ${nearestFile}`);
+        console.log(`There is a file next to the one saved : ${nearestFile}`);
 
         if (nearestFile) {
-
-            //Configure storage account
-            console.log(`Configure storage account`);
-
 
             //Transfer file
             console.log(`Transfer file ${nearestFile}`);
             referenceDate = getDateFromFileName(nearestFile);
             await transferToBlob(nearestFile);
+        }
 
-            //Remove closed files
-            console.log(`************** DELETE LOCAL FILES **************`);
-            for (const file of audioFiles) {
-                console.log(`Check file ${file}`);
-                var filePath = `${process.env.FOLDER}/${file}`;
+        //Remove closed files
+        console.log(`************** DELETE LOCAL FILES **************`);
+        for (const file of audioFiles) {
+            console.log(`Check file ${file}`);
+            var filePath = `${process.env.FOLDER}/${file}`;
 
-                //Get the date to the file
-                var fileToDeleteDate = getDateFromFileName(file);
-                console.log(`The date of the file to delete: ${fileToDeleteDate}`);
+            //Get the date to the file
+            var fileToDeleteDate = getDateFromFileName(file);
+            console.log(`The date of the file to delete: ${fileToDeleteDate}`);
 
-                //Compare the ref date if is lower
-                if (fileToDeleteDate.isSameOrBefore(referenceDate)) {
-                    console.log(`The date ${fileToDeleteDate} is same/before the reference date ${referenceDate} so delete it`);
-                    removeFile(filePath);
-                }
+            //Compare the ref date if is lower
+            if (fileToDeleteDate.isSameOrBefore(referenceDate)) {
+                console.log(`The date ${fileToDeleteDate} is same/before the reference date ${referenceDate} so delete it`);
+                removeFile(filePath);
             }
         }
-        else {
-            console.log(`Nothing to transfer`);
-        }
+
     });
+
 });
 
-//Utils
-function getDateFromFileName(file) {
-    return moment(file.split("_")[1].replace(path.extname(file), ""));
-}
-
-
-//Transfer copies to blob storage
-async function configureStorageAccount() {
-
-    tableClient = azure.createTableService();
-
-    // Create table if not exists
-    tableClient.createTableIfNotExists(TABLE_STORAGE, function (error, result, response) {
-        if (!error) {
-            // Table exists or created
-        }
-    });
-
-    const blobServiceClient = new BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
-
-
-    //Create container    
-    const containerName = process.env.STREAM_NAME.toLocaleLowerCase();
-    containerClient = blobServiceClient.getContainerClient(containerName);
-
-    //Create container if it doesn't exist
-    try {
-        console.log(`Trying to create the container ${containerName}`);
-        const createContainerResponse = await containerClient.create();
-        console.log(`Create container ${containerName} successfully`, createContainerResponse.requestId);
-
-    } catch (error) {
-        console.log(`[ERROR][configureStorageAccount] ${error.message}`);
-        // throw error;
-    }
-}
-
-async function transferToBlob(fileName) {
-
-    const blobName = `${moment(fileName.split("_")[1].replace(path.extname(fileName), '')).format("DD-MM-YYYY")}/${fileName}`;
-
-    console.log(`Trying to upload ${blobName}`);
-
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-
-    try {
-        const uploadBlobResponse = await blockBlobClient.uploadFile(`${process.env.FOLDER}/${fileName}`);
-        console.log(`Upload block blob ${blobName} successfully`, uploadBlobResponse.requestId);
-
-        console.log(`Save ${fileName} in Azure Storage Table`);
-        await registryInsertion(fileName);
-
-    } catch (error) {
-        console.log(`[ERROR][transferToBlob] ${error.message}`);
-        throw error;
-    }
-}
-
-async function registryInsertion(lastFileInserted) {
-
-    console.log(`*********** INSERT REGISTRY IN AZURE STORAGE TABLE ***********`);
-
-    var row = {
-        PartitionKey: { '_': process.env.STREAM_NAME.toLocaleLowerCase() },
-        RowKey: azure.TableUtilities.entityGenerator.String(registries.length.toString()),
-        fileName: lastFileInserted
+    //Utils
+    function getDateFromFileName(file) {
+        return moment(file.split("_")[1].replace(path.extname(file), ""));
     }
 
-    tableClient.insertEntity(TABLE_STORAGE, row, function (error, result, response) {
-        if (!error) {
-            // Entity inserted
-            console.log(`audio ${lastFileInserted} recorded`);
+
+    //Transfer copies to blob storage
+    async function configureStorageAccount() {
+
+        tableClient = azure.createTableService();
+
+        // Create table if not exists
+        tableClient.createTableIfNotExists(TABLE_STORAGE, function (error, result, response) {
+            if (!error) {
+                // Table exists or created
+            }
+        });
+
+        const blobServiceClient = new BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+
+
+        //Create container    
+        const containerName = process.env.STREAM_NAME.toLocaleLowerCase();
+        containerClient = blobServiceClient.getContainerClient(containerName);
+
+        //Create container if it doesn't exist
+        try {
+            console.log(`Trying to create the container ${containerName}`);
+            const createContainerResponse = await containerClient.create();
+            console.log(`Create container ${containerName} successfully`, createContainerResponse.requestId);
+
+        } catch (error) {
+            console.log(`[ERROR][configureStorageAccount] ${error.message}`);
         }
-    });
-}
+    }
 
-function removeFile(file) {
-    fs.unlink(file, (err) => {
-        if (err) {
-            console.error(err)
-            return
+    async function transferToBlob(fileName) {
+
+        const blobName = `${moment(fileName.split("_")[1].replace(path.extname(fileName), '')).format("DD-MM-YYYY")}/${fileName}`;
+
+        console.log(`Trying to upload ${blobName}`);
+
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+        try {
+            const uploadBlobResponse = await blockBlobClient.uploadFile(`${process.env.FOLDER}/${fileName}`);
+            console.log(`Upload block blob ${blobName} successfully`, uploadBlobResponse.requestId);
+
+            console.log(`Save ${fileName} in Azure Storage Table`);
+            await registryInsertion(fileName);
+
+        } catch (error) {
+            console.log(`[ERROR][transferToBlob] ${error.message}`);
+            throw error;
+        }
+    }
+
+    async function registryInsertion(lastFileInserted) {
+
+        console.log(`*********** INSERT REGISTRY IN AZURE STORAGE TABLE ***********`);
+
+        var maxValueTicks = moment(new Date(9999, 12, 31, 23, 59, 59, 9999999)).unix();
+        console.log(`maxValueTicks :${maxValueTicks}`);
+        var currentTicks = moment().unix();
+        console.log(`currentTicks: ${currentTicks}`);
+
+        console.log(`Final ticks value: ${maxValueTicks - currentTicks}`);
+
+        var row = {
+            PartitionKey: { '_': process.env.STREAM_NAME.toLocaleLowerCase() },
+            RowKey: azure.TableUtilities.entityGenerator.String((maxValueTicks - currentTicks).toString()), //It will help me to fetch the last entry
+            fileName: lastFileInserted
         }
 
-        console.log(`${file} removed`);
+        tableClient.insertEntity(TABLE_STORAGE, row, function (error, result, response) {
+            if (!error) {
+                // Entity inserted
+                console.log(`audio ${lastFileInserted} recorded`);
+            }
+        });
+    }
 
-    });
-}
+    function removeFile(file) {
+        fs.unlink(file, (err) => {
+            if (err) {
+                console.error(err)
+                return
+            }
+
+            console.log(`${file} removed`);
+
+        });
+    }

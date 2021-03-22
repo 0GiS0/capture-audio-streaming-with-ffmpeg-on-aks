@@ -31,34 +31,57 @@ cd terraform
 # Initialize Terraform
 # Yo need an extra storage account to store the TF state (this one cannot be included in the terraform configuration)
 terraform init \
-    -backend-config="storage_account_name=[STORAGE_ACCOUNT_NAME]" \
-    -backend-config="container_name=[STORAGE_CONTAINER_NAME]" \
-    -backend-config="key=[TF_STATE_NAME]" \
-    -backend-config="access_key=[STORAGE_ACCESS_KEY]"
+    -backend-config="storage_account_name=STORAGE_NAME" \
+    -backend-config="container_name=STORAGE_CONTAINER" \
+    -backend-config="key=capture-audio-stream-with-ffmpeg.tfstate" \
+    -backend-config="access_key=STORAGE_ACCESS_KEY"
 
-terraform plan -out ffmpeg-env.tfpplan
+terraform plan -out ffmpeg-env.tfplan
+
 terraform apply ffmpeg-env.tfplan
 
+#Mac & Linux
 SERVICE_NAME=$(terraform output -raw service_name)
+ACR_NAME=$(terraform output -raw acr_name)
+CONNECTION_STRING=$(terraform output -raw storage_account_connectionstring)
+
+#Windows (PowerShell)
+$SERVICE_NAME=$(terraform output -raw service_name)
+$ACR_NAME=$(terraform output -raw acr_name)
+$CONNECTION_STRING=$(terraform output -raw storage_account_connectionstring)
+
 
 ### 3. Build transfer-files-job image ###
 cd ..
 cd transfer-files-job
-docker build -t 0gis0/transfer-files-job .
-docker push 0gis0/transfer-files-job #TODO: change to ACR
+
+
+#Login Azure Container Registry
+az acr login -g $SERVICE_NAME -n $ACR_NAME
+
+#Build and push the image
+docker build -t ${ACR_NAME}.azurecr.io/transfer-files-job .
+docker push ${ACR_NAME}.azurecr.io/transfer-files-job
 
 ### 4. Execute on AKS ###
 az aks get-credentials -g $SERVICE_NAME -n $SERVICE_NAME
 
-#The configuration of the stream is in config-map.yaml
-#You should change at least:
-# stream:  #The stream URL you want to record
-# stream.name:  #The stream name (in order to create a folder and a container)
 
-#The connection string for the azure storage account > secret.yaml
-cd terraform
-CONNECTION_STRING=$(terraform output -raw storage_account_connectionstring)
-echo $CONNECTION_STRING
+######## REQUIRED CHANGES ############
+
+# 1. The configuration of the stream is in config-map.yaml
+#    You should change at least:
+#       stream:  #The stream URL you want to record
+#       stream.name:  #The stream name (in order to create a folder and a container)
+
+#2. The connection string in base64 for the azure storage account > secret.yaml
+
+#  Mac & Linux
+echo -n $CONNECTION_STRING | base64
+#  Windows (PowerShell)
+[System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($CONNECTION_STRING))
+
+#########################################
 
 # Deploy all resources in AKS
 cd ..

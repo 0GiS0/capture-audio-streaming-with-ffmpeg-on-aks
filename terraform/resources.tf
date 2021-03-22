@@ -10,39 +10,10 @@ provider "azurerm" {
   features {}
 }
 
-provider "azuread" {
-}
 
 #Random name
 resource "random_pet" "service" {
 }
-
-#Random password
-resource "random_string" "password" {
-  length  = 32
-  special = true
-}
-
-#Create an Azure AD App
-resource "azuread_application" "app" {
-  display_name = random_pet.service.id
-  homepage     = "http://${random_pet.service.id}"
-}
-
-#Create a service principal
-resource "azuread_service_principal" "sp" {
-  application_id               = azuread_application.app.application_id
-  app_role_assignment_required = false
-}
-
-#Create a password for the azure ad service principal
-resource "azuread_service_principal_password" "secret" {
-  service_principal_id = azuread_service_principal.sp.id
-  description          = "secret"
-  value                = random_string.password.result
-  end_date             = "2099-01-01T01:02:03Z"
-}
-
 
 #Resource group
 resource "azurerm_resource_group" "k8s" {
@@ -73,6 +44,17 @@ resource "azurerm_log_analytics_solution" "insights" {
   }
 }
 
+
+#Azure Container Registry
+resource "azurerm_container_registry" "acr" {
+  name                = replace(random_pet.service.id, "-", "")
+  resource_group_name = azurerm_resource_group.k8s.name
+  location            = azurerm_resource_group.k8s.location
+  sku                 = "Standard"
+  admin_enabled       = false
+}
+
+
 #AKS clúster
 resource "azurerm_kubernetes_cluster" "k8s" {
   name                = random_pet.service.id
@@ -87,9 +69,8 @@ resource "azurerm_kubernetes_cluster" "k8s" {
     vm_size    = "Standard_D2_v2"
   }
 
-  service_principal {
-    client_id     = azuread_service_principal.sp.application_id
-    client_secret = azuread_service_principal_password.secret.value
+  identity {
+    type = "SystemAssigned"
   }
 
   addon_profile {
@@ -106,6 +87,14 @@ resource "azurerm_kubernetes_cluster" "k8s" {
     load_balancer_sku = "Standard"
     network_plugin    = "kubenet"
   }
+}
+
+#Role assignment
+resource "azurerm_role_assignment" "role_acrpull" {
+  scope                            = azurerm_container_registry.acr.id
+  role_definition_name             = "AcrPull"
+  principal_id                     = azurerm_kubernetes_cluster.k8s.kubelet_identity.0.object_id
+  skip_service_principal_aad_check = true
 }
 
 

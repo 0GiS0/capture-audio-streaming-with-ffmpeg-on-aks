@@ -4,17 +4,16 @@
     "description": "",
     "main": "job.js",
     "scripts": {
-      "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "echo \"Error: no test specified\" && exit 1"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "dependencies": {
-      "@azure/storage-blob": "^12.5.0",
-      "azure-storage": "^2.10.3",    
-      "dotenv": "^8.2.0",
-      "get-audio-duration": "^2.0.3",
-      "moment": "^2.29.1"
+        "@azure/storage-blob": "^12.5.0",
+        "azure-storage": "^2.10.3",
+        "dotenv": "^8.2.0",
+        "get-audio-duration": "^2.0.3",
+        "moment": "^2.29.1"
     }
-  }
-  
+}
